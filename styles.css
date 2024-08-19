@@ -69,13 +69,12 @@ button.incorrect {
     font-size: 1.2rem;
     font-weight: bold;
 }
-
 #new-game-btn {
     font-size: 1.2rem;
     padding: 0.7rem 1.5rem;
-    background-color: #008CBA;
+    background-color: #0404e2;
 }
 
 #new-game-btn:hover {
-    background-color: #007B9A;
+    background-color: #0202c5;
 }
