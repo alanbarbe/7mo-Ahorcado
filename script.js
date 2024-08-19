@@ -1,3 +1,11 @@
+let supabaseClient;
+
+async function initSupabase() {
+    const supabaseUrl = 'https://qvvrmlfxqzawshotgmmk.supabase.co';
+    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2dnJtbGZ4cXphd3Nob3RnbW1rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjI4OTg4MDgsImV4cCI6MjAzODQ3NDgwOH0.U4RK_t2xMjJTfQpFv6VNnJFyfeToFG3ZwwrlhnCcRlY';
+    supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+}
+
 // Clase para manejar el juego del Ahorcado
 class Ahorcado {
     constructor() {
@@ -12,6 +20,10 @@ class Ahorcado {
         this.canvas = document.getElementById('hangman-canvas');
         this.ctx = this.canvas.getContext('2d');
 
+        this.startTime = null;
+        this.endTime = null;
+        this.score = 0;
+
         this.newGameBtn.addEventListener('click', () => this.startNewGame());
     }
 
@@ -25,12 +37,15 @@ class Ahorcado {
             this.normalizedWord = this.normalizeWord(this.word);
             this.guessedLetters = [];
             this.remainingAttempts = 6;
+            this.startTime = new Date(); // Registrar el tiempo de inicio
+            this.score = 0; // Reiniciar la puntuación
             this.updateDisplay();
             this.createLetterButtons();
             this.messageElement.textContent = '';
             this.enableLetterButtons();
             this.clearCanvas();
             this.drawGallows();
+            this.showScoreTable();
         } catch (error) {
             console.error('Error al obtener la palabra:', error);
             this.messageElement.textContent = 'Error al iniciar el juego. Inténtalo de nuevo.';
@@ -89,12 +104,18 @@ class Ahorcado {
     }
 
     // Verificar el estado del juego
-    checkGameStatus() {
+    async checkGameStatus() {
         if (this.normalizedWord === this.normalizeWord(this.wordContainer.textContent.replace(/ /g, ''))) {
-            this.messageElement.textContent = '¡Felicidades! Has ganado.';
+            this.calcularPuntuacion(); // Calcular la puntuación al ganar
+            const playerNombre = prompt(`¡Felicidades! Has ganado con ${this.score} puntos. Ingresa tu nombre:`);
+            if (playerNombre) {
+                await this.savePlayerData(playerNombre, this.score);
+            }
+            this.messageElement.textContent = `¡Felicidades! Has ganado con ${this.score} puntos.`;
             this.endGame();
         } else if (this.remainingAttempts === 0) {
-            this.messageElement.textContent = `Perdiste. La palabra era: ${this.word}`;
+            this.calcularPuntuacion(); // Calcular la puntuación al perder
+            this.messageElement.textContent = `Perdiste. La palabra era: ${this.word}. Tu puntuación: ${this.score} puntos.`;
             this.endGame();
         }
     }
@@ -174,8 +195,96 @@ class Ahorcado {
         }
         this.ctx.stroke();
     }
+
+    calcularPuntuacion() {
+        this.endTime = new Date(); // Registrar el tiempo de finalización
+        const tiempoTranscurrido = (this.endTime - this.startTime) / 1000; // en segundos
+        this.score = Math.max(1000 - Math.floor(tiempoTranscurrido) * 10, 100);
+    }
+
+    async savePlayerData(nombre, puntos) {
+        try {
+            console.log('Intentando guardar datos del jugador:', {
+                nombre,
+                puntos
+            });
+            const {
+                data,
+                error
+            } = await supabaseClient
+                .from('score')
+                .insert([{
+                    nombre,
+                    puntos,
+                    fecha: new Date().toISOString()
+                }, ]);
+
+            if (error) {
+                console.error('Error al guardar los datos del jugador:', error);
+                this.messageElement.textContent = `Error al guardar los datos: ${error.message}`;
+            } else {
+                console.log('Datos del jugador guardados correctamente:', data);
+                this.messageElement.textContent = `¡Felicidades ${nombre}! Tu puntuación de ${puntos} puntos ha sido registrada.`;
+            }
+        } catch (error) {
+            console.error('Error inesperado al guardar los datos del jugador:', error);
+            this.messageElement.textContent = `Error inesperado: ${error.message}`;
+        }
+    }
+
+    /**
+ * Muestra la tabla de puntuaciones
+ */
+    async showScoreTable() {
+        try {
+            console.log('Intentando obtener datos de la tabla de posiciones...');
+            let { data, error } = await supabaseClient
+                .from('score')
+                .select('*')
+                .order('puntos', { ascending: false })
+                .limit(1000);
+    
+            if (error) {
+                throw error;
+            }
+    
+            if (data && data.length > 0) {
+                let scoreTableHtml = '<h2>Tabla de Posiciones</h2><table>';
+                scoreTableHtml += '<tr><th>Puesto</th><th>Nombre</th><th>Puntos</th><th>Fecha</th></tr>';
+    
+                data.forEach((score, index) => {
+                    scoreTableHtml += `<tr>
+                        <td>${index + 1}</td>
+                        <td>${score.nombre}</td>
+                        <td>${score.puntos}</td>
+                        <td>${new Date(score.fecha).toLocaleDateString()}</td>
+                    </tr>`;
+                });
+    
+                scoreTableHtml += '</table>';
+                this.messageElement.innerHTML = scoreTableHtml;
+                console.log('Tabla de posiciones renderizada correctamente');
+            } else {
+                this.messageElement.textContent = 'No hay datos de puntuación disponibles.';
+                console.log('No se encontraron datos de puntuación');
+            }
+        } catch (error) {
+            console.error('Error al obtener los datos de la tabla de posiciones:', error);
+            if (error instanceof TypeError && error.message.includes('fetch')) {
+                this.messageElement.textContent = 'Error de conexión. Por favor, verifica tu conexión a internet e intenta de nuevo.';
+            } else {
+                this.messageElement.textContent = `Error al cargar la tabla de posiciones: ${error.message}`;
+            }
+        }
+    }
 }
 
 // Inicializar el juego
-const game = new Ahorcado();
-game.startNewGame();
+async function initGame() {
+    await initSupabase();
+    const game = new Ahorcado();
+    await game.startNewGame();
+}
+
+// Esperar a que el DOM esté completamente cargado
+document.addEventListener('DOMContentLoaded', initGame);
